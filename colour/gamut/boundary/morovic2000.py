@@ -22,6 +22,8 @@ References
 from __future__ import division, unicode_literals
 
 import numpy as np
+
+from colour.algebra import cartesian_to_spherical
 from colour.gamut.boundary import close_gamut_boundary_descriptor
 from colour.models import Jab_to_JCh, JCh_to_Jab
 from colour.utilities import (as_int, as_int_array, as_float_array,
@@ -49,17 +51,26 @@ def gamut_boundary_descriptor_Morovic2000(Jab,
     phi, r, alpha = tsplit(JCh)
     alpha = np.radians(alpha)
 
+    # Jab_o = np.reshape(Jab, [-1, 3]) - E
+    # J, a, b = tsplit(Jab_o)
+    # r = np.linalg.norm(Jab_o, axis=-1)
+    # alpha = np.arctan(a / J)
+    # phi = np.arccos(b / r)
+
+    # r, phi, alpha = tsplit(
+    #     cartesian_to_spherical(np.reshape(Jab, [-1, 3]) - E))
+
     GDB_m = np.full([m, n, 3], np.nan)
 
     # Lightness :math:`J` is in range [-E_{J}, E_{J}], converted to range
     # [0, m], :math:`\\phi` indices are in range [0, m - 1].
     phi_i = linear_conversion(phi, (-E[0], E[0]), (0, m))
-    phi_i = as_int_array(np.clip(np.floor(phi_i), 0, m - 1))
+    phi_i = as_int_array(np.clip(np.around(phi_i), 0, m - 1))
 
     # Polar coordinates are in range [0, 2 * pi], converted to range [0, n],
     # :math:`\\alpha` indices are in range [0, n - 1].
     alpha_i = linear_conversion(alpha, (0, 2 * np.pi), (0, n))
-    alpha_i = as_int_array(np.clip(np.floor(alpha_i), 0, n - 1))
+    alpha_i = as_int_array(np.clip(np.around(alpha_i), 0, n - 1))
 
     for i in np.arange(m):
         for j in np.arange(n):
@@ -69,7 +80,7 @@ def gamut_boundary_descriptor_Morovic2000(Jab,
             if i_j.size == 0:
                 continue
 
-            GDB_m[i, j] = JCh[i_j[np.argmax(r[i_j])]]
+            GDB_m[i, j] = Jab[i_j[np.argmax(r[i_j])]]
 
     # Naive non-vectorised implementation kept for reference.
     # :math:`r_m` is used to keep track of the maximum :math:`r` value.
@@ -81,5 +92,5 @@ def gamut_boundary_descriptor_Morovic2000(Jab,
     #     if r[i] > r_i_j or np.isnan(r_i_j):
     #         GDB_m[p_i, a_i] = Jab_i
     #         r_m[p_i, a_i] = r[i]
-
+    #
     return GDB_m

@@ -43,31 +43,28 @@ __all__ = [
 ]
 
 
-def close_gamut_boundary_descriptor(GDB_m, Jab, E=np.array([50, 0, 0])):
-
+def close_gamut_boundary_descriptor(GDB_m, Jab):
     GDB_m = np.copy(as_float_array(GDB_m))
     Jab = as_float_array(Jab)
-    E = as_float_array(E)
 
     if not np.allclose(GDB_m[0, ...], GDB_m[0, ...][0]):
-        JCh_l = np.mean(
-            Jab_to_JCh(Jab[Jab[..., 0] == np.min(Jab[..., 0])] - E), axis=0)
+        Jab_l = np.mean(Jab[Jab[..., 0] == np.min(Jab[..., 0])], axis=0)
 
         warning(
-            'Inserting a singularity at the bottom of GBD: {0}'.format(JCh_l))
+            'Inserting a singularity at the bottom of GBD: {0}'.format(Jab_l))
+
         GDB_m = np.insert(
-            GDB_m, 0, np.tile(JCh_l, [1, GDB_m.shape[1], 1]), axis=0)
+            GDB_m, 0, np.tile(Jab_l, [1, GDB_m.shape[1], 1]), axis=0)
 
     if not np.allclose(GDB_m[-1, ...], GDB_m[-1, ...][0]):
-        JCh_h = np.mean(
-            Jab_to_JCh(Jab[Jab[..., 0] == np.max(Jab[..., 0])] - E), axis=0)
+        Jab_h = np.mean(Jab[Jab[..., 0] == np.max(Jab[..., 0])], axis=0)
 
-        warning('Inserting a singularity at the top of GBD: {0}'.format(JCh_h))
+        warning('Inserting a singularity at the top of GBD: {0}'.format(Jab_h))
 
         GDB_m = np.insert(
             GDB_m,
             GDB_m.shape[0],
-            np.tile(JCh_h, [1, GDB_m.shape[1], 1]),
+            np.tile(Jab_h, [1, GDB_m.shape[1], 1]),
             axis=0)
 
     return GDB_m
@@ -113,9 +110,11 @@ def unsparse_gamut_boundary_descriptor(GDB_m):
             values[..., i], (x_g, y_g),
             method='linear')
 
-    print(GDB_m_i.shape)
-    print(r_slice, c_slice)
-    return GDB_m_i[r_slice, c_slice, :]
+    GDB_m_i = GDB_m_i[r_slice, c_slice, :]
+
+    # mask_s = mask[r_slice, c_slice]
+
+    return GDB_m_i
 
 
 def interpolate_gamut_boundary_descriptor(GDB_m, m, n):
@@ -143,7 +142,7 @@ def tessellate_gamut_boundary_descriptor(GDB_m):
     if is_trimesh_installed():
         import trimesh
 
-        vertices = JCh_to_Jab(GDB_m)
+        vertices = np.copy(GDB_m)
 
         # Wrapping :math:`GDB_m` to create faces between the outer columns.
         vertices = np.insert(
@@ -154,18 +153,18 @@ def tessellate_gamut_boundary_descriptor(GDB_m):
         faces = []
         for i in np.arange(shape_r - 1):
             for j in np.arange(shape_c - 1):
-                a_i = [i, j]
-                b_i = [i, j + 1]
-                c_i = [i + 1, j]
-                d_i = [i + 1, j + 1]
+                a = [i, j]
+                b = [i, j + 1]
+                c = [i + 1, j]
+                d = [i + 1, j + 1]
 
                 # Avoiding overlapping triangles when tessellating the bottom.
                 if not i == 0:
-                    faces.append([a_i, b_i, c_i])
+                    faces.append([a, b, c])
 
                 # Avoiding overlapping triangles when tessellating the top.
                 if not i == shape_r - 2:
-                    faces.append([c_i, b_i, d_i])
+                    faces.append([c, b, d])
 
         indices = np.ravel_multi_index(
             np.transpose(as_int_array(faces)), [shape_r, shape_c])
@@ -188,6 +187,7 @@ if __name__ == '__main__':
     # export PYTHONPATH=$PYTHONPATH:/Users/kelsolaar/Documents/Development/colour-science/colour:/Users/kelsolaar/Documents/Development/colour-science/trimesh
     # python /Users/kelsolaar/Documents/Development/colour-science/colour/colour/gamut/boundary/common.py
 
+    import sys
     import trimesh
     import trimesh.smoothing
 
@@ -197,7 +197,26 @@ if __name__ == '__main__':
     from colour.gamut import gamut_boundary_descriptor_Morovic2000
 
     np.set_printoptions(
-        formatter={'float': '{:0.2f}'.format}, linewidth=2048, suppress=True)
+        formatter={'float': '{:0.2f}'.format},
+        linewidth=2048,
+        suppress=True,
+        threshold=sys.maxsize)
+
+    def c_to_s(Jab, E=np.array([50, 0, 0])):
+        Jab_o = Jab - E
+        J, a, b = tsplit(Jab_o)
+
+        r = np.linalg.norm(Jab_o, axis=-1)
+        alpha = np.arctan(b / a)
+        phi = np.arctan(J / np.linalg.norm(tstack([a, b]), axis=-1))
+        r_alpha_phi = tstack([r, alpha, phi])
+
+        return r_alpha_phi
+
+    # v = (np.random.rand(100000, 3) - [0, 0.5, 0.5]) * [100, 200, 200]
+    # s = c_to_s(v )
+    # print(np.min(s, axis=0))
+    # print(np.max(s, axis=0))
 
     def create_plane(width=1,
                      height=1,
@@ -344,6 +363,8 @@ if __name__ == '__main__':
 
         return vertices, faces, outline
 
+    # *************************************************************************
+
     m, n = 3, 8
     t = 3
     Hab = np.tile(np.arange(-180, 180, 45) / 360, t)
@@ -359,21 +380,12 @@ if __name__ == '__main__':
     ])
 
     LCHab = tstack([L, C, Hab])
-    Jab = colour.convert(
+    Jab_p = colour.convert(
         LCHab, 'CIE LCHab', 'CIE Lab', verbose={'describe': 'short'}) * 100
 
-    np.random.seed(16)
-    RGB = np.random.random([200, 200, 3])
+    # *************************************************************************
 
-    s = 192
-    RGB = colour.plotting.geometry.cube(
-        width_segments=s, height_segments=s, depth_segments=s)
-    Jab_E = colour.convert(
-        RGB, 'RGB', 'CIE Lab', verbose={'describe': 'short'}) * 100
-
-    Jab = Jab_E
-
-    vertices, faces, outline = create_box(1, 1, 1, 16, 16, 16)
+    vertices, faces, outline = create_box(1, 1, 1, 32, 32, 32)
     RGB_r = vertices['position'] + 0.5
     Jab_r = colour.convert(
         RGB_r, 'RGB', 'CIE Lab', verbose={'describe': 'short'}) * 100
@@ -382,24 +394,59 @@ if __name__ == '__main__':
     mesh_r.fix_normals()
     # mesh_r.show()
 
-    segments = (32, 36, 40)
-    k_r = 32
+    np.random.seed(16)
+    RGB = np.random.random([200, 200, 3])
+
+    # *************************************************************************
+
+    # s = 32
+    # RGB_t = colour.plotting.geometry.cube(
+    #     width_segments=s, height_segments=s, depth_segments=s)
+    # print(RGB_t)
+
+    RGB_t = RGB_r
+
+    Jab_t = colour.convert(
+        RGB_t, 'RGB', 'CIE Lab', verbose={'describe': 'short'}) * 100
+
+    # *************************************************************************
+
+    XYZ = np.random.rand(1000, 3)
+    XYZ = XYZ[colour.is_within_visible_spectrum(XYZ)]
+
+    Jab_x = colour.convert(
+        XYZ, 'CIE XYZ', 'CIE Lab', verbose={'describe': 'short'}) * 100
+
+    # *************************************************************************
+
+    # Jab = Jab_p
+    # Jab = Jab_t
+    Jab = Jab_x
+
+    # *************************************************************************
+
+    v_r = 32
+    h_r = v_r * 1
+    # segments = (v_r, v_r + 2, v_r + 4)
+    segments = (v_r, )
+    slc_v = v_r
+    slc_h = h_r
 
     GDB_m_s = []
-    for k in segments:
+    for v in segments:
         print('^' * 79)
-        print('k', k)
-        GDB_m = gamut_boundary_descriptor_Morovic2000(Jab, [50, 0, 0], k, 64)
+        print('v', v)
+        GDB_m = gamut_boundary_descriptor_Morovic2000(Jab, [50, 0, 0], v, h_r)
 
-        GDB_m_c = close_gamut_boundary_descriptor(GDB_m, Jab, [50, 0, 0])
+        GDB_m_c = close_gamut_boundary_descriptor(GDB_m, Jab)
         d = GDB_m_c.shape[0] - GDB_m.shape[0]
         print('d', d)
 
         GDB_m_u = unsparse_gamut_boundary_descriptor(GDB_m_c)
-        if k != k_r:
+        if v != v_r:
             print('!!! Interpolating !!!')
             GDB_m_i = interpolate_gamut_boundary_descriptor(
-                GDB_m_u, k_r + d, 64)
+                GDB_m_u, v_r + d, h_r)
         else:
             GDB_m_i = GDB_m_u
 
@@ -408,21 +455,26 @@ if __name__ == '__main__':
         print('GDB_m_u', GDB_m_u.shape)
         print('GDB_m_i', GDB_m_i.shape)
 
-        print(GDB_m[..., 0][:10, :10])
-        print(GDB_m_c[..., 0][:10, :10])
-        print(GDB_m_u[..., 0][:10, :10])
-        print(GDB_m_i[..., 0][:10, :10])
+        print('GDB_m')
+        print(GDB_m[..., 0][:slc_v, :slc_h])
+        print(GDB_m[..., 1][:slc_v, :slc_h])
+        print(GDB_m[..., 2][:slc_v, :slc_h])
+        print('GDB_m_c')
+        print(GDB_m_c[..., 0][:slc_v, :slc_h])
+        print(GDB_m_c[..., 1][:slc_v, :slc_h])
+        print(GDB_m_c[..., 2][:slc_v, :slc_h])
+        print('GDB_m_u')
+        print(GDB_m_u[..., 0][:slc_v, :slc_h])
+        print(GDB_m_u[..., 1][:slc_v, :slc_h])
+        print(GDB_m_u[..., 2][:slc_v, :slc_h])
+        print('GDB_m_i')
+        print(GDB_m_i[..., 0][:slc_v, :slc_h])
+        print(GDB_m_i[..., 1][:slc_v, :slc_h])
+        print(GDB_m_i[..., 2][:slc_v, :slc_h])
 
         # GDB_m_i[GDB_m_i.shape[0] // 2:, ...] += (
         #     np.random.rand(*(GDB_m_i[GDB_m_i.shape[0] // 2:, ...].shape)) * 25)
         GDB_m_s.append(GDB_m_i)
-
-    # print('^' * 79)
-    # print(GDB_m_i[..., 0])
-    # print(GDB_m[..., 1])
-    # print(GDB_m_i[..., 1])
-    # print(GDB_m[..., 2])
-    # print(GDB_m_i[..., 2])
 
     import matplotlib.pyplot as plt
 
@@ -470,16 +522,16 @@ if __name__ == '__main__':
     # trimesh.smoothing.filter_laplacian(GDB_t, iterations=25)
     # trimesh.repair.broken_faces(GDB_t, color=(255, 0, 0, 255))
 
-    # GDB_t.export('/Users/kelsolaar/Downloads/mesh.dae', 'dae')
-
     GDB_t_r = GDB_t_s[0]
-    # for i, GDB_t in enumerate(GDB_t_s[0:]):
-    #     GDB_t.vertices += [(i + 1) * 100, 0, 0]
-    #     GDB_t_r = GDB_t_r + GDB_t
+    for i, GDB_t in enumerate(GDB_t_s[1:]):
+        GDB_t.vertices += [(i + 1) * 100, 0, 0]
+        GDB_t_r = GDB_t_r + GDB_t
 
-    mesh_r.vertices += [50, 0, -150]
-    GDB_t_r = GDB_t_r + mesh_r
+    # mesh_r.vertices += [-50, 0, 0]
+    # GDB_t_r = GDB_t_r + mesh_r
 
-    trimesh.smoothing.filter_laplacian(GDB_t_r, iterations=25)
+    # trimesh.smoothing.filter_laplacian(GDB_t_r, iterations=25)
+
+    GDB_t_r.export('/Users/kelsolaar/Downloads/mesh.obj', 'obj')
 
     GDB_t_r.show()
